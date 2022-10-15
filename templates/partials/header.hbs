@@ -1,0 +1,17 @@
+<header>
+
+   <h1>Sample header</h1>
+
+   {{#if userSession }}
+   <a href="/">Home</a>
+   <a href="/profile">Profile</a>
+   <form action="/logout" method="post">
+      <button type="submit">Logout</button>
+   </form>
+
+   {{else}}
+   <a href="/login">Login</a>
+   <a href="/register">Register</a>
+   {{/if}}
+   <hr>
+</header>

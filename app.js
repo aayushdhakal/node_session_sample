@@ -1,9 +1,24 @@
+/*
+ This is basic login and signup using express,express-session using node app.
+ This code shows the use of express authentication based on session using the hbs as the primary template 
+ The session cookie can only save the cookie for the time being of 2 hours which can be extented as wished.
+ cookie or the session can be decided as the user when to remember it or not
+ we used the mongodb database for this example
+*/
+
 const express = require('express');
 const session = require('express-session');
-const bodyParser = require('body-parser');// body parser is nat mainly used as express.urlencoded is used
-const { exists } = require('fs');
-const TWO_HOURS = 1000 * 60 * 60 * 2;
+const bodyParser = require('body-parser');// body parser is not mainly used now mainly express.urlencoded is used in current verssion of the express
+const hbs = require('hbs'); //this is for the templating as partials  and views  
+const path = require('path'); // this is available as the default node apis 
+const User = require('./models/users')//this is used for the user model of the mongodb database
+const TWO_HOURS = 1000 * 60 * 60 * 2; // time for the cookie to expires 
 
+require('./db/db'); // running the mongodb database 
+
+
+//setting up the default variable used in the express
+//this variable is used in the default express-session values
 const {
    PORT = 3000,
    NODE_ENV = 'development',
@@ -13,173 +28,169 @@ const {
    SESS_LIFETIME = TWO_HOURS
 } = process.env;
 
+
+//setting the default variable used in the templating(hbs) path declaration
+const {
+   publicDirectoryPath = path.join(__dirname, './public'),//path file for the default image, js and css files
+   viewspath = path.join(__dirname, './templates/views'),// path declaration for the views for hbs  
+   partialsPath = path.join(__dirname, './templates/partials') //path declaration for the partials for hbs
+} = process.env 
+
 const IN_PROD = NODE_ENV === 'production'; // in production we have to implement the tls system for https
 
-const users = [
-   { id: 1, name: 'Alex', email: 'alex@gamil.com', password: 'secret' },
-   { id: 2, name: 'Jhons', email: 'jhons@gamil.com', password: 'secret' },
-   { id: 3, name: 'Max', email: 'max@gmail.com', password: 'secret' },
-] // acting as the temporary database 
-
-
 const app = express();
-app.use(express.json())
-app.use(express.urlencoded({
-   extended: true
-})) // we have to explicitly define it otherwise it will show the warning 
+app.use(express.json());//it is used to parse the incomming request with JSON payload
+app.use(express.urlencoded({ extended: true })) //expects request data to be sent encoded in the URL, usually in strings or arrays
+//we have to explicitly define extende:true  otherwise it might show the warning 
+
+//for partials or hbs
+app.set('view engine', 'hbs');//declaring the templating langauge as hbs, some other templating language are Mustache,ejs,handlebars,dot,nuckjucks,underscore,pub,webix,hogan,marko,jsrender
+app.set('views', viewspath);//setting the views path
+hbs.registerPartials(partialsPath);//setting the partials path
+app.use(express.static(publicDirectoryPath));//declaring the public(js,css,image) path
 
 
+// setting up the express-session with the some various default values and setting for the cookie 
 app.use(session({
-   name: SESS_NAME, //custom name 
-   resave: false, // not to store the sessions back to the store if they were not modified during request
-   saveUninitialized: false, // dont save the session if it doesnt have any data on it for auth
-   secret: SESS_SECRECT, // acustom secrect
-   cookie: { // foor default HTTP only and it is for the cookie options
-      maxAge: SESS_LIFETIME,
-      sameSite: true, //or strict // also use protection from the csrf for working in older machine in prod
-      secure: IN_PROD
+   name: SESS_NAME,
+   resave: false, 
+   saveUninitialized: false,
+   secret: SESS_SECRECT,
+   cookie: {
+      sameSite: true,
+      secure: IN_PROD,
+      maxAge:SESS_LIFETIME
    }
 }))
 
-const redirectLogin = (req, res, next) => { // middleware use such that if the session does't exists redirect it to Login page working on Home page
-   if (!req.session.userID) {
-      res.redirect('/login');
+//this is the function used to render the views along with the default values like name,email,userSession 
+const renderpage = (
+   req, 
+   res, 
+   pageName, 
+   objectData = {})=>{
+   return res.render(`${pageName}`, {
+      name: req.session.data.name,
+      email: req.session.data.email,
+      userSession: req.session.userSession
+   })
+}
+
+const redirectLogin = (req, res, next) => { // middleware use such that if the session does't exists redirect it to Login page
+   if (!req.session.userSession) {
+      res.render('login');
    } else {
       next()
    }
 }
 
-const redirectHome = (req, res, next) => { // middleware use such that if logged and users goes to login page then it will redirect it to the home page
-   if (req.session.userID) {
-      res.redirect('/home');
+const redirectHome = (req, res, next) => { // middleware use such that if logged and wehn users goes to login page then it will redirect it to the home page
+
+   if (req.session.userSession) {
+      return renderpage(req,res, 'index');
    } else {
       next()
    }
 }
 
-app.get('/', (req, res) => { // this is the page for the home page accessed to everyone
-   // console.log(req.session);
-   const { userID } = req.session;
-
-   res.send(`
-      <html>
-         <head></head>
-         <body>
-            <h1>Welcome</h1>
-            ${userID ? `
-               <a href="/home">Home</a>
-               <form method='post' action='/logout'>
-                  <button>Logout</button>
-               </form>
-            ` : `
-               <a href="/login">Login</a>
-               <a href="/register">Register</a>
-            ` }
-
-         </body>
-      </html>
-   `)
-})
-
-app.use((req, res, next) => { // middleware such that if logged in then the user is saved in the locals such that each request will be passed through this request
-   const { userID } = req.session
-   if (userID) {
-      res.locals.user = users.find(user => user.id === userID);
+const useSessionData = (req,res, next) => {//if the middleware has the req.session.data then set the req.session.data with some datas and then process it
+   if(req.session.data){
+      const user = {
+         name: req.session.data.name,
+         email: req.session.data.email
+      }
    }
-   next();
+   next()
+}
 
-})
-
-app.get('/home', redirectLogin, (req, res) => { // home page accessed only when the user is logged in
-   const { user } = res.locals
-   console.log(req.session);
-   res.send(`
-      <h1>Home</h1>
-      <a href="/">Main</a>
-      <ul>
-         <li>Name:${user.name} </li>
-         <li>Email:${user.email} </li>
-      </ul>
-   `)
+app.get('/', redirectLogin, useSessionData ,(req, res) => {
+   return renderpage(req,res, 'index');
 })
 
 app.get('/profile', redirectLogin, (req, res) => { // demo link for checking the user data
    const { user } = res.locals;
+   renderpage(req,res,'profile')
 })
 
-app.get('/login', redirectHome, (req, res) => { // get request for providing the page in login request
-   res.send(`
-      <h1>Login get</h1>
-      <form action='/login' method='POST'>
-         <input type='email' name='email' placeholder='Email'  value='${users[0].email}' required />
-         <input type='password' name='password' placeholder='password' value='${users[0].password}'required />
-         <button>Submit</button>
-      </form>
-      <a href='/register'>Register</a>
-   `)
+app.get('/login', redirectHome, async (req, res) => { // get request for providing the page in login request
+   res.render('login');
+
 })
 
 app.get('/register', redirectHome, (req, res) => { // get request for providing the page in register request
-   res.send(`
-      <h1>Register</h1>
-      <form method='POST' action='/register'>
-         <input type='text' name='name' placeholder='name' required />
-         <input type='email' name='email' placeholder='Email' required />
-         <input type='password' name='password' placeholder='password' required />
-         <input type='submit' />
-      </form>
-      <a href='/login'>Login</a>
-   `)
+   res.render('register')
 })
 
-app.post('/login', redirectHome, (req, res) => { // post request for login
-   const { email, password } = req.body // getting data from the user in the req.body
-   console.log(req.body)
 
-   if (email && password) { // check if the email and password is passed through
+app.post('/login', redirectHome, async (req, res) => { // post request for login
+   try {
+      //running the function passing the email and password which will go throught the User model which will check the database and return user info if found else throw error
+      const user = await User.findByCredentials(req.body.email, req.body.password);
 
-      //check in the array if the user exists or not
-      const user = users.find(user => user.email === email && user.password === password)
-
-      if (user) { // if user exists then we save the user id in user session
-         req.session.userID = user.id
-         return res.redirect('/home')
-      }
-   }
-
-   res.redirect('/login');// if the email and password doesnt exists then redirect it to home
-})
-
-app.post('/register', redirectHome, (req, res) => { // post request for the register
-   const { name, email, password } = req.body  // get name email and password from the request body
-
-   if (name && email && password) { // check if the name, email and password exists
-      const exists = users.some(user => user.email === email) // check if the email exists in the users array
-
-      if (!exists) { // if the users doesnt exists in the array we work with
-         const user = {
-            id: users.length + 1,
-            name,
-            email,
-            password
+      //if the user is found then it willed be proccessed
+      if (user) {
+         //setting the user session
+         req.session.userSession = user.id
+         
+         //check if the checkbox is ticked or not if not ticked then the session-cookie with will set as the session expires when browers closes but when it is ticked then the session cookie will have the expiration date as given above
+         if (req.body.remember !== 'on') {
+            req.session.cookie.expires = false //make the session-cookie expires when the bowser exits 
          }
 
-         users.push(user); // addin the new user to the array
-         req.session.userID = user.id // pushing the user id in the session id 
-         return res.redirect('/home')
+         //passing the information on the session using req.session.data as object
+         req.session.data = {
+            name: user.name,
+            email: user.email
+         }
+
+         //running the function as the with numerous parameters
+         return renderpage(req,res,'index');
       }
+
+   } catch (e) {
+      //catches the error if the User.findByCredentials throw the error if the user is not found or the password doesn't matches or any other error like connection timeout so on. and error will be processed it with the message as the object and render it
+      return res.render('login', {
+         error: e.message
+      })
+   }
+})
+
+app.post('/register', redirectHome, async (req, res) => { // post request for the register a new user
+
+   //check if the both password and re-password matches and render the page register page with the error 
+   if (req.body.password !== req.body.rePassword) {
+      return res.render('register', {
+         error: "Password doesn't match"
+      });
    }
 
-   res.redirect('register'); // TODO: qs /register?error=error.auth.emailTooShort
+   //extracting the user from the request body and setting as the new class model with various parameters
+   const user = new User({ name, email, password } = req.body);
 
+   // console.log(user);
+   try {
+      //trying to save the new user on the database 
+      await user.save()
+   } catch (e) {
+      //it will process the error on the render page if any occurs like email address already exists soo on with the message
+      return res.render('register', {
+         error: e.message
+      })
+   }
+
+   //if the registration of the new user is successful then we redirect it to login page
+   res.redirect('/login');
 })
 
 app.post('/logout', redirectLogin, (req, res) => { // post route for the logout
+
+   //destroying the session on the browers and as it logout
    req.session.destroy(err => {
-      if (err) {// if the req.session is not destroyed then procced on err callback and redirect to home
+      if (err) {// if the req.session is not destroyed in case then procced on err callback and redirect to home without logout
          return res.redirect('/home');
       }
 
+      //clearing the cookie when logout
       res.clearCookie(SESS_NAME); // clearing the cookie which has the name of SESS_NAME
       res.redirect('/login');
    });
